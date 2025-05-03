@@ -19,12 +19,13 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 @SpireInitializer
-
 public class repetablerelics implements
         EditStringsSubscriber,
         EditKeywordsSubscriber,
@@ -36,14 +37,20 @@ public class repetablerelics implements
     public static final Logger logger = LogManager.getLogger(MOD_ID);
 
     private static final Set<String> seenRelics = new HashSet<>();
-    private static boolean relicPoolRefreshed = false;
+    public static final Set<String> refreshingPools = new HashSet<>(); // Tracks pools currently being refreshed
+
+    private static List<String> commonRelics = Collections.emptyList();
+    private static List<String> uncommonRelics = Collections.emptyList();
+    private static List<String> rareRelics = Collections.emptyList();
+    private static List<String> shopRelics = Collections.emptyList();
+    private static List<String> bossRelics = Collections.emptyList();
 
     public static String makeID(String id) {
         return MOD_ID + ":" + id;
     }
 
     public static void initialize() {
-        logger.info("Initializing repetablerelicsmod..."); // Debug statement to confirm initialization
+        logger.info("Initializing repetablerelicsmod...");
         new repetablerelics();
     }
 
@@ -56,7 +63,6 @@ public class repetablerelics implements
     @Override
     public void receivePostInitialize() {
         logger.info("Post-initialization started...");
-        // Add any additional debug information here if needed
         logger.info("Post-initialization complete.");
     }
 
@@ -64,18 +70,47 @@ public class repetablerelics implements
     public void receivePostDungeonInitialize() {
         logger.info("Post-dungeon initialization started...");
         seenRelics.clear();
-        relicPoolRefreshed = false;
-        logger.info("Cleared seen relics and reset relic pool refresh flag.");
+        refreshingPools.clear(); // Clear refreshing state at the start of a new dungeon
+
+        // Capture the relic pools at the start of the run
+        commonRelics = new ArrayList<>(AbstractDungeon.commonRelicPool);
+        uncommonRelics = new ArrayList<>(AbstractDungeon.uncommonRelicPool);
+        rareRelics = new ArrayList<>(AbstractDungeon.rareRelicPool);
+        shopRelics = new ArrayList<>(AbstractDungeon.shopRelicPool);
+        bossRelics = new ArrayList<>(AbstractDungeon.bossRelicPool);
+
+        logger.info("Captured relic pools at the start of the run.");
     }
 
     @Override
     public void receivePostUpdate() {
-        logger.debug("Post-update check: relicPoolRefreshed = " + relicPoolRefreshed);
-        if (!relicPoolRefreshed && allRelicsSeen()) {
-            logger.info("All relics have been seen. Refreshing relic pools...");
-            refreshRelicPools();
-            relicPoolRefreshed = true;
-            logger.info("Relic pools refreshed.");
+        // Ensure the logic only runs during an active dungeon run
+        if (!AbstractDungeon.isPlayerInDungeon()) {
+            return;
+        }
+
+        logger.debug("Post-update check for individual relic pools...");
+
+        // Check and refresh each pool only if it is not currently being refreshed
+        if (allRelicsSeenInPool(AbstractDungeon.commonRelicPool)) {
+            logger.info("All common relics have been seen. Refreshing common relic pool...");
+            refreshRelicPool(AbstractDungeon.commonRelicPool, "common");
+        }
+        if (allRelicsSeenInPool(AbstractDungeon.uncommonRelicPool)) {
+            logger.info("All uncommon relics have been seen. Refreshing uncommon relic pool...");
+            refreshRelicPool(AbstractDungeon.uncommonRelicPool, "uncommon");
+        }
+        if (allRelicsSeenInPool(AbstractDungeon.rareRelicPool)) {
+            logger.info("All rare relics have been seen. Refreshing rare relic pool...");
+            refreshRelicPool(AbstractDungeon.rareRelicPool, "rare");
+        }
+        if (allRelicsSeenInPool(AbstractDungeon.shopRelicPool)) {
+            logger.info("All shop relics have been seen. Refreshing shop relic pool...");
+            refreshRelicPool(AbstractDungeon.shopRelicPool, "shop");
+        }
+        if (allRelicsSeenInPool(AbstractDungeon.bossRelicPool)) {
+            logger.info("All boss relics have been seen. Refreshing boss relic pool...");
+            refreshRelicPool(AbstractDungeon.bossRelicPool, "boss");
         }
     }
 
@@ -114,16 +149,7 @@ public class repetablerelics implements
         logger.info("Keywords loaded successfully.");
     }
 
-    private boolean allRelicsSeen() {
-        logger.debug("Checking if all relics have been seen...");
-        return allRelicsSeenInPool(AbstractDungeon.commonRelicPool)
-                && allRelicsSeenInPool(AbstractDungeon.uncommonRelicPool)
-                && allRelicsSeenInPool(AbstractDungeon.rareRelicPool)
-                && allRelicsSeenInPool(AbstractDungeon.shopRelicPool)
-                && allRelicsSeenInPool(AbstractDungeon.bossRelicPool);
-    }
-
-    private boolean allRelicsSeenInPool(List<String> relicPool) {
+    public static boolean allRelicsSeenInPool(List<String> relicPool) {
         if (relicPool == null) {
             logger.warn("Relic pool is null.");
             return true;
@@ -137,25 +163,54 @@ public class repetablerelics implements
         return true;
     }
 
-    private void refreshRelicPools() {
-        logger.info("Refreshing all relic pools...");
-        refreshRelicPool(AbstractDungeon.commonRelicPool);
-        refreshRelicPool(AbstractDungeon.uncommonRelicPool);
-        refreshRelicPool(AbstractDungeon.rareRelicPool);
-        refreshRelicPool(AbstractDungeon.shopRelicPool);
-        refreshRelicPool(AbstractDungeon.bossRelicPool);
-    }
-
-    private void refreshRelicPool(List<String> relicPool) {
+    public static void refreshRelicPool(List<String> relicPool, String poolName) {
         if (relicPool == null) {
-            logger.warn("Relic pool is null. Skipping refresh.");
+            logger.warn(poolName + " relic pool is null. Skipping refresh.");
             return;
         }
+        if (refreshingPools.contains(poolName)) {
+            logger.debug(poolName + " relic pool is already being refreshed. Skipping.");
+            return;
+        }
+
+        refreshingPools.add(poolName); // Mark the pool as being refreshed
+
+        // Use the captured relic pools to repopulate the pool
+        List<String> allRelics = getAllRelicsForPool(poolName);
+        if (allRelics == null || allRelics.isEmpty()) {
+            logger.error("No relics available to refresh " + poolName + " relic pool.");
+            refreshingPools.remove(poolName); // Remove the pool from refreshing state
+            return;
+        }
+
         relicPool.clear();
-        logger.info("Cleared relic pool.");
-        for (String relicID : AbstractDungeon.relicsToRemoveOnStart) {
+        logger.info("Cleared " + poolName + " relic pool.");
+
+        for (String relicID : allRelics) {
             relicPool.add(relicID);
-            logger.debug("Added relic to pool: " + relicID);
+            logger.debug("Re-added relic to " + poolName + " pool: " + relicID);
+        }
+
+        refreshingPools.remove(poolName); // Remove the pool from refreshing state
+        logger.info(poolName + " relic pool has been refreshed.");
+    }
+
+    private static List<String> getAllRelicsForPool(String poolName) {
+        // Use the captured relic pools
+        switch (poolName.toLowerCase()) {
+            case "common":
+                return commonRelics;
+            case "uncommon":
+                return uncommonRelics;
+            case "rare":
+                return rareRelics;
+            case "shop":
+                return shopRelics;
+            case "boss":
+                return bossRelics;
+            default:
+                logger.error("Unknown relic pool: " + poolName);
+                return null;
         }
     }
 

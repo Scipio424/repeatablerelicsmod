@@ -1,0 +1,12 @@
+{
+  "modid": "repetablerelicsmod",
+  "name": "Repetable Relics Mod",
+  "author_list": ["ajmandahl"],
+  "description": "This mod makes it so when you see all relics in a run the bracelets will be replaced by new repeat relics!",
+  "version": "1.0.0",
+  "sts_version": "12-18-2022",
+  "mts_version": "3.30.0",
+  "classname": "repetablerelicsmod.repetablerelics",
+  "dependencies": ["basemod", "stslib"],
+  "optional_dependencies": []
+}
